@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Data and logs
+data/
+jars/
+
+# Docker
+*.log
+docker/*.log
+docker_data/
+kafka_data/
+zookeeper_data/
+zookeeper_log/
+
+# Environment
+.env
+.env.*
+
+# Ignore secrets and credentials
+secrets.*
+
+# Ignore test outputs
+test-results/
+
+# Ignore system files
+Thumbs.db
+
+# Ignore requirements lock files
+poetry.lock
+Pipfile.lock
+
+# Ignore build outputs
+dist/
+build/
+
+# Ignore temporary files
+*.tmp
+*.swp
+*.swo
+
+# Ignore scripts output
+scripts/*.log
+
+# Ignore README artifacts
+*.md.bak
