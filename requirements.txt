@@ -1,0 +1,7 @@
+python-dotenv
+kafka-python
+requests
+pyspark
+streamlit
+pandas
+plotly
