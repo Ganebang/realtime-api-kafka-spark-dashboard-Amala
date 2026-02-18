@@ -7,6 +7,8 @@ load_dotenv()
 class OpenWeatherClient:
     def __init__(self):
         self.api_key = os.getenv("OPENWEATHER_API_KEY")
+        if not self.api_key:
+            raise ValueError("OPENWEATHER_API_KEY is not set. Please add it to your .env file or environment.")
         self.base_url = "https://api.openweathermap.org/data/2.5/weather"
 
     def fetch_weather(self, city):

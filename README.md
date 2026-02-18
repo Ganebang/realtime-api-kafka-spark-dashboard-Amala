@@ -6,18 +6,18 @@ A complete end-to-end data engineering project that ingests real-time weather da
 
 ```mermaid
 graph TD
-    API[OpenWeatherMap API] -->|JSON| Producer[Python Producer]
-    Producer -->|Topic: raw_api_events| Kafka[Kafka Broker]
-    
+    API[OpenWeatherMap API] -->|JSON| Producer[Python Producer];
+    Producer -->|Topic: raw_api_events| Kafka[Kafka Broker];
+
     subgraph Processing Layer
-        Kafka -->|Read Stream| Spark[Spark Streaming (PySpark)]
-        Spark -->|Aggregation (3m Window)| Spark
-        Spark -->|Topic: weather_aggregates| Kafka
+        Kafka -->|Read Stream| SparkNode[Spark Streaming (PySpark)];
+        SparkNode -->|Aggregation (3m Window)| SparkNode;
+        SparkNode -->|Topic: weather_aggregates| Kafka;
     end
-    
+
     subgraph Visualization Layer
-        Kafka -->|Consume Stream| Dashboard[Streamlit Dashboard]
-        Dashboard -->|Live Charts & Metrics| User[End User]
+        Kafka -->|Consume Stream| Dashboard[Streamlit Dashboard];
+        Dashboard -->|Live Charts & Metrics| User[End User];
     end
 ```
 
@@ -53,11 +53,18 @@ graph TD
 The project includes a helper script to automate the entire startup process.
 
 1.  **Clone the repository** (if you haven't already).
-2.  **Sourcing the environment** (optional but recommended):
+2.  **Create & populate your `.env`**
+    ```bash
+    cp .env.example .env
+    # then open .env and set your personal OpenWeather API key
+    # e.g. OPENWEATHER_API_KEY=your_api_key_here
+    ```
+    The producer will fail with a clear error if the key is missing.
+3.  **Sourcing the environment** (optional but recommended):
     ```bash
     source .venv/bin/activate
     ```
-3.  **Run the application**:
+4.  **Run the application**:
     ```bash
     ./scripts/run_all.sh
     ```
@@ -125,5 +132,6 @@ This project uses environment variables to manage sensitive information like API
     ```bash
     cp .env.example .env
     ```
-    Then, edit `.env` and add your actual API keys.
+    Then, edit `.env` and add your actual API keys. At minimum you must populate `OPENWEATHER_API_KEY`. If this value is empty the producer will log 401 errors (see `producer.log`) and the dashboard will not receive any data.
+3.  **Restart services** after modifying the `.env` file so that the producer picks up the new values.
 ```

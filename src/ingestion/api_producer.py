@@ -44,8 +44,13 @@ def main():
         print(f"Critical Error: Failed to initialize Kafka Producer: {e}")
         return
 
-    # 3. Initialize API Client
-    client = OpenWeatherClient()
+    # 3. Initialize API Client (will raise ValueError if key missing)
+    try:
+        client = OpenWeatherClient()
+    except ValueError as e:
+        print(f"Configuration Error: {e}")
+        print("Producer shutting down. Please set OPENWEATHER_API_KEY in your environment.")
+        return
     print(f"Starting API Producer. Polling {len(cities)} cities every {poll_interval}s...")
 
     # Graceful shutdown handler
