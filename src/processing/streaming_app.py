@@ -1,16 +1,27 @@
 import os
+import sys
 from dotenv import load_dotenv
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, to_timestamp, window, avg, max
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 
+# Load environment variables
 load_dotenv()
+
+# Unset SPARK_HOME to ensure we use the pyspark bundled version
+# This must be done BEFORE importing pyspark
+if "SPARK_HOME" in os.environ:
+    del os.environ["SPARK_HOME"]
 
 # Force Java 17 to avoid incompatibility with Java 25 and Spark/Hadoop
 os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-17-openjdk-amd64"
 
+try:
+    from pyspark.sql import SparkSession
+    from pyspark.sql.functions import col, from_json, to_timestamp, window, avg, max, min
+    from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+except ImportError:
+    print("Error: PySpark not found. Please ensure it is installed in your environment.")
+    sys.exit(1)
+
 # 1. Define the Schema based on OpenWeatherMap's JSON structure
-# This matches the "Explicit StructType schema" requirement in section 6.2
 schema = StructType([
     StructField("name", StringType()),
     StructField("dt", IntegerType()),  # Unix timestamp from API
@@ -23,77 +34,122 @@ schema = StructType([
     ]))
 ])
 
-def main():
+def create_spark_session():
+    """Initialize and return a Spark Session."""
+    print("Initializing Spark Session...")
     try:
-        print("Initializing Spark Session...")
-        import pyspark
-        print(f"PySpark Version: {pyspark.__version__}")
-        print(f"PySpark Location: {pyspark.__file__}")
-        print(f"SPARK_HOME: {os.environ.get('SPARK_HOME')}")
+        # Get absolute path to librairies folder
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        libs_path = os.path.join(project_root, "librairies")
+        
+        # List all jars
+        jars = [os.path.join(libs_path, f) for f in os.listdir(libs_path) if f.endswith('.jar')]
+        jars_str = ",".join(jars)
 
-        # Initialize Spark Session with Kafka connector
         spark = SparkSession.builder \
             .appName("WeatherStreamingApp") \
-            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
+            .config("spark.jars", jars_str) \
+            .config("spark.driver.extraClassPath", jars_str) \
+            .config("spark.executor.extraClassPath", jars_str) \
             .getOrCreate()
-
         spark.sparkContext.setLogLevel("WARN")
         print("Spark Session Initialized.")
+        return spark
+    except Exception as e:
+        print(f"Critical Error: Failed to create Spark Session: {e}")
+        sys.exit(1)
 
-        # 2. Read from Kafka (Requirement 6.2: readStream)
-        print("Setting up Kafka Read Stream...")
-        raw_df = spark.readStream \
-            .format("kafka") \
-            .option("kafka.bootstrap.servers", os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")) \
-            .option("subscribe", "raw_api_events") \
-            .option("startingOffsets", "latest") \
-            .load()
-        print("Kafka Read Stream setup.")
+def read_stream(spark):
+    """Read data from Kafka."""
+    print("Setting up Kafka Read Stream...")
+    kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    return spark.readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", kafka_servers) \
+        .option("subscribe", "raw_api_events") \
+        .option("startingOffsets", "latest") \
+        .load()
 
-        # 3. Parse JSON and Convert Timestamp
-        # We cast the binary value to string, then parse the JSON
-        parsed_df = raw_df.selectExpr("CAST(value AS STRING)") \
-            .select(from_json(col("value"), schema).alias("data")) \
-            .select("data.*") \
-            .withColumn("event_time", to_timestamp(col("dt")))
+def process_data(raw_df):
+    """Parse JSON and aggregate data."""
+    # window settings
+    window_duration = os.getenv("SPARK_WINDOW_DURATION", "5 minutes")
+    slide_duration = os.getenv("SPARK_SLIDE_DURATION", "1 minute")
+    
+    print(f"Processing data with window={window_duration}, slide={slide_duration}")
 
-        # 4. Apply Window Operations (Requirement 5.3 & 6.2)
-        # - 5-minute sliding window, sliding every 1 minute
-        # - 2-minute watermark to handle late data
-        aggregated_df = parsed_df \
-            .withWatermark("event_time", "2 minutes") \
-            .groupBy(
-                window(col("event_time"), "5 minutes", "1 minute"),
-                col("name") # Business dimension: City
-            ) \
-            .agg(
-                avg("main.temp").alias("avg_temp"),
-                max("wind.speed").alias("max_wind_speed")
-            ) \
-            .select(
-                col("window.start").alias("window_start"),
-                col("window.end").alias("window_end"),
-                "name",
-                "avg_temp",
-                "max_wind_speed"
-            )
+    # Parse JSON
+    parsed_df = raw_df.selectExpr("CAST(value AS STRING)") \
+        .select(from_json(col("value"), schema).alias("data")) \
+        .select("data.*") \
+        .withColumn("event_time", to_timestamp(col("dt")))
 
-        # 5. Output to Console for Validation (Step 7.4 requirement)
-        # We use 'complete' mode to see the updated aggregation table
-        print("Starting Streaming Query...")
-        query = aggregated_df.writeStream \
-            .outputMode("complete") \
-            .format("console") \
-            .option("truncate", "false") \
-            .start()
+    # Apply Window Operations
+    aggregated_df = parsed_df \
+        .withWatermark("event_time", "2 minutes") \
+        .groupBy(
+            window(col("event_time"), window_duration, slide_duration),
+            col("name") # Business dimension: City
+        ) \
+        .agg(
+            avg("main.temp").alias("avg_temp"),
+            min("main.temp").alias("min_temp"),
+            max("main.temp").alias("max_temp"),
+            max("wind.speed").alias("max_wind_speed")
+        ) \
+        .select(
+            col("window.start").alias("window_start"),
+            col("window.end").alias("window_end"),
+            "name",
+            "avg_temp",
+            "min_temp",
+            "max_temp",
+            "max_wind_speed"
+        )
+    return aggregated_df
+
+def write_stream(aggregated_df):
+    """Output stream to Kafka."""
+    print("Starting Streaming Query to Kafka...")
+    
+    # Prepare DataFrame for Kafka (key, value)
+    kafka_df = aggregated_df.selectExpr(
+        "CAST(name AS STRING) AS key",
+        "to_json(struct(*)) AS value"
+    )
+    
+    kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    topic = "weather_aggregates"
+    checkpoint_location = "/tmp/checkpoint_weather_agg"
+
+    return kafka_df.writeStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", kafka_servers) \
+        .option("topic", topic) \
+        .option("checkpointLocation", checkpoint_location) \
+        .outputMode("update") \
+        .start()
+
+def main():
+    spark = create_spark_session()
+    
+    try:
+        raw_df = read_stream(spark)
+        aggregated_df = process_data(raw_df)
+        query = write_stream(aggregated_df)
         
         print("Query Started. Awaiting Termination...")
         query.awaitTermination()
         print("Query Terminated.")
+        
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"Stream processing error: {e}")
         import traceback
         traceback.print_exc()
+    except KeyboardInterrupt:
+        print("Stopping application...")
+    finally:
+        spark.stop()
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 python-dotenv
 kafka-python
 requests
-pyspark
+pyspark==3.5.1
 streamlit
 pandas
 plotly

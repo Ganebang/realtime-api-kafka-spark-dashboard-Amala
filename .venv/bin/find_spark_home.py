@@ -1,4 +1,4 @@
-#!/workspaces/realtime-api-kafka-spark-dashboard-Amala/.venv/bin/python3
+#!/home/vboxuser/projets/realtime-api-kafka-spark-dashboard-Amala/.venv/bin/python3
 
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
