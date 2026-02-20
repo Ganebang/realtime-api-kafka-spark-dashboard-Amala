@@ -4,109 +4,154 @@ import os
 import datetime
 import signal
 import sys
+import logging
+from typing import List
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
-from api_client import OpenWeatherClient
+
+from ingestion.api_client import OpenWeatherClient
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load configuration (API key, Kafka servers, etc.) from the .env file
 load_dotenv()
 
-def main():
-    # 1. Configuration
-    bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    topic_name = "raw_api_events"
+# Configure logging for easier debugging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def load_config() -> dict:
+    """Load and validate configuration from environment."""
+    # default configuration values; environment variables override them
+    cfg = {
+        "bootstrap_servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+        "topic_name": os.getenv("KAFKA_RAW_TOPIC", "raw_api_events"),
+        "cities": [],
+        "poll_interval": 30,
+    }
+
     cities_str = os.getenv("CITIES", "Paris,London,New York,Tokyo")
-    cities = cities_str.split(",") if cities_str else []
-    
+    cfg["cities"] = [c.strip() for c in cities_str.split(",") if c.strip()]
+
     try:
-        poll_interval = int(os.getenv("POLL_INTERVAL", "30"))
+        cfg["poll_interval"] = int(os.getenv("POLL_INTERVAL", "30"))
     except ValueError:
-        print("Invalid POLL_INTERVAL, defaulting to 30s")
-        poll_interval = 30
+        logger.warning("Invalid POLL_INTERVAL, defaulting to 30s")
 
-    if not cities:
-        print("Error: No CITIES defined in environment variables.")
-        return
+    if not cfg["cities"]:
+        logger.error("No CITIES defined in environment variables.")
 
-    print(f"Configuration: Bootstrap Servers={bootstrap_servers}, Topic={topic_name}, Poll Interval={poll_interval}s")
+    return cfg
 
-    # 2. Initialize Kafka Producer
+
+def create_producer(bootstrap_servers: str) -> KafkaProducer:
+    """Initialize KafkaProducer with JSON serialization."""
+    # KafkaProducer will connect to the broker and send bytes. We wrap
+    # the data as JSON strings so that other programs (Spark, Streamlit) can
+    # read it easily.
     try:
         producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            key_serializer=lambda v: str(v).encode('utf-8'),
-            retries=5
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            key_serializer=lambda v: str(v).encode("utf-8"),
+            retries=5,
         )
-        print("Kafka Producer initialized successfully.")
+        logger.info("Kafka Producer initialized successfully.")
+        return producer
     except Exception as e:
-        print(f"Critical Error: Failed to initialize Kafka Producer: {e}")
-        return
+        logger.critical(f"Failed to initialize Kafka Producer: {e}")
+        raise
 
-    # 3. Initialize API Client (will raise ValueError if key missing)
+
+def create_client() -> OpenWeatherClient:
+    """Create an OpenWeatherClient, raising if the API key is missing."""
     try:
         client = OpenWeatherClient()
+        return client
     except ValueError as e:
-        print(f"Configuration Error: {e}")
-        print("Producer shutting down. Please set OPENWEATHER_API_KEY in your environment.")
-        return
-    print(f"Starting API Producer. Polling {len(cities)} cities every {poll_interval}s...")
+        logger.critical(e)
+        raise
 
-    # Graceful shutdown handler
+
+def publish_weather(
+    producer: KafkaProducer, topic: str, data: dict
+) -> None:
+    """Send a single weather record to Kafka, adding ingestion metadata."""
+    # use the city name as the message key so that Kafka partitions
+    # by city (not required, but makes debugging easier)
+    city_key = data.get("name")
+    # add a timestamp showing when we pulled the data
+    data["ingestion_timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
+    producer.send(topic, key=city_key, value=data)
+    logger.debug(f"Sent data for {city_key} to Kafka.")
+
+
+def main_loop(cfg: dict, producer: KafkaProducer, client: OpenWeatherClient) -> None:
+    """Main polling loop that gathers weather data and publishes it."""
     running = True
-    def signal_handler(sig, frame):
+
+    def _signal_handler(sig, frame):
         nonlocal running
-        print("Shutdown signal received. Stopping producer...")
+        logger.info("Shutdown signal received. Stopping producer...")
         running = False
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
 
     try:
         while running:
             start_time = time.time()
-            
-            for city in cities:
-                city = city.strip()
-                if not city:
-                    continue
-                    
+            for city in cfg["cities"]:
                 try:
                     data = client.fetch_weather(city)
-                    
-                    if data:
-                        # Use City Name as Kafka Key for partitioning
-                        city_key = data.get("name")
-                        
-                        # Add ingestion timestamp (using timezone-aware UTC)
-                        data['ingestion_timestamp'] = datetime.datetime.now(datetime.UTC).isoformat()
-                        
-                        producer.send(topic_name, key=city_key, value=data)
-                        print(f"Sent data for {city_key} to Kafka. Timestamp: {data['ingestion_timestamp']}")
-                    else:
-                        print(f"Warning: No data received for {city}")
-                        
                 except Exception as e:
-                    print(f"Error processing city {city}: {e}")
-            
-            try:
-                producer.flush() # Ensure messages are sent
-            except KafkaError as e:
-                print(f"Error: Failed to flush messages to Kafka: {e}")
+                    logger.error(f"Error fetching {city}: {e}")
+                    continue
 
-            # Sleep for the remainder of the interval
+                if data:
+                    publish_weather(producer, cfg["topic_name"], data)
+                else:
+                    logger.warning(f"No data received for {city}")
+
+            try:
+                producer.flush()
+            except KafkaError as e:
+                logger.error(f"Failed to flush messages to Kafka: {e}")
+
             elapsed = time.time() - start_time
-            sleep_time = max(0, poll_interval - elapsed)
+            sleep_time = max(0, cfg["poll_interval"] - elapsed)
             if running and sleep_time > 0:
                 time.sleep(sleep_time)
-            
     except Exception as e:
-        print(f"Critical Error in main loop: {e}")
+        logger.critical(f"Critical error in main loop: {e}")
+        raise
     finally:
-        print("Closing Kafka Producer...")
+        logger.info("Closing Kafka Producer...")
         producer.close()
-        print("Producer closed. Bye!")
+        logger.info("Producer closed. Bye!")
+
+
+def main():
+    cfg = load_config()
+    if not cfg["cities"]:
+        sys.exit(1)
+
+    try:
+        producer = create_producer(cfg["bootstrap_servers"])
+        client = create_client()
+    except Exception:
+        sys.exit(1)
+
+    logger.info(
+        f"Starting API Producer. Polling {len(cfg['cities'])} cities every {cfg['poll_interval']}s..."
+    )
+
+    main_loop(cfg, producer, client)
+
 
 if __name__ == "__main__":
     main()

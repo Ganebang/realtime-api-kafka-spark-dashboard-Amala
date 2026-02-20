@@ -4,6 +4,9 @@ A complete end-to-end data engineering project that ingests real-time weather da
 
 ## 🏗️ Architecture
 
+![Dashboard screenshot](screenshots/project_img.png)
+
+
 ```mermaid
 graph TD
     API[OpenWeatherMap API] -->|JSON| Producer[Python Producer];
@@ -11,7 +14,7 @@ graph TD
 
     subgraph Processing Layer
         Kafka -->|Read Stream| SparkNode[Spark Streaming (PySpark)];
-        SparkNode -->|Aggregation (3m Window)| SparkNode;
+        SparkNode -->|Aggregation (5‑minute sliding window)| SparkNode;
         SparkNode -->|Topic: weather_aggregates| Kafka;
     end
 
@@ -23,9 +26,10 @@ graph TD
 
 ## 🚀 Key Features
 
-*   **Real-Time Ingestion**: Polls weather data for multiple cities every 15 seconds.
+*   **Real-Time Ingestion**: Polls weather data for multiple cities every 15 seconds (configurable via `.env`).
 *   **Stream Processing**: Uses Spark Structured Streaming to calculate rolling averages, min/max temperatures, and wind speeds.
 *   **Low Latency**: Optimized for near real-time updates (15s latency).
+*   **Data Persistence**: Raw messages are archived under `data/`, and processing state is kept in `checkpoints/` for reliable restarts.
 *   **Premium Dashboard**:
     *   **Dark Mode UI** with custom card styling.
     *   **Live Metrics**: Current Temperature, Min/Max (with deltas).
@@ -39,7 +43,7 @@ graph TD
 *   **Ingestion**: `kafka-python`, OpenWeatherMap API
 *   **Message Broker**: Apache Kafka, Zookeeper (via Docker)
 *   **Processing**: Apache Spark (PySpark)
-*   **Visualization**: Streamlit, Plotly
+*   **Visualization**: Streamlit, Plotly (dashboard now shows average, min, and max temperatures plus wind speed)
 *   **Infrastructure**: Docker, Docker Compose
 
 ## 📋 Prerequisites
@@ -60,7 +64,7 @@ The project includes a helper script to automate the entire startup process.
     # e.g. OPENWEATHER_API_KEY=your_api_key_here
     ```
     The producer will fail with a clear error if the key is missing.
-3.  **Sourcing the environment** (optional but recommended):
+3.  **Activate the virtual environment** (optional but recommended):
     ```bash
     source .venv/bin/activate
     ```
@@ -68,13 +72,13 @@ The project includes a helper script to automate the entire startup process.
     ```bash
     ./scripts/run_all.sh
     ```
-    This script will:
+    This script will automatically:
     *   Start Docker containers (Kafka, Zookeeper, Kafka UI).
     *   Start the API Producer in the background.
     *   Start the Spark Streaming App in the background.
-    *   Launch the Streamlit Dashboard.
+    *   Launch the Streamlit Dashboard. Metrics include the current average temperature along with minimum and maximum readings for each city.
 
-4.  **Access the Dashboard**:
+5.  **Access the Dashboard**:
     Open your browser at **[http://localhost:8501](http://localhost:8501)**.
 
 ## 🔧 Manual Setup
@@ -120,7 +124,11 @@ If you prefer to run components individually, use separate terminals:
 │   └── processing/
 │       └── streaming_app.py # Spark Streaming Job
 ├── librairies/              # JAR dependencies (Spark/Kafka)
+├── data/                    # Bronze parquet storage (raw events)
+├── checkpoints/             # Spark & Kafka offset state
+├── screenshots/             # Example images and documentation
 ├── .env                     # Configuration (API Keys, Settings)
+├── .env.example             # Template for environment variables
 └── requirements.txt         # Python Dependencies
 
 ## 🔒 Security

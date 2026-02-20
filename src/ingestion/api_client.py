@@ -1,7 +1,10 @@
+# simple client that talks to OpenWeatherMap's REST API
+# it uses requests to make HTTP calls and dotenv to read the API key
 import requests
 import os
 from dotenv import load_dotenv
 
+# read variables from .env file into environment
 load_dotenv()
 
 class OpenWeatherClient:
@@ -15,10 +18,11 @@ class OpenWeatherClient:
         """
         Queries the API for a specific city and handles basic HTTP errors.
         """
+        # build query parameters for the HTTP GET request
         params = {
             "q": city,
             "appid": self.api_key,
-            "units": "metric" # We want Celsius
+            "units": "metric" # ask the API to return temperatures in Celsius
         }
         
         try:

@@ -6,6 +6,7 @@ from kafka import KafkaConsumer
 import plotly.express as px
 
 # --- Configuration ---
+# Streamlit allows basic page settings (title, layout) when it starts.
 st.set_page_config(
     page_title="Real-Time Weather Analytics",
     layout="wide",
@@ -60,6 +61,8 @@ with st.sidebar:
     st.info("Status: Listening to Kafka Topic `weather_aggregates`")
 
 # --- Initialize Kafka Consumer ---
+# Create a connection to Kafka once and keep it cached; Streamlit is clever
+# about not re-running this on every interaction.
 @st.cache_resource
 def init_consumer():
     return KafkaConsumer(
@@ -91,8 +94,10 @@ def update_dashboard():
 
     # Prepare Data
     if st.session_state.data:
-        df = pd.DataFrame(st.session_state.data)
-        df['time'] = pd.to_datetime(df['window_start'])
+        # turn buffered messages into a pandas table so we can manipulate them
+    df = pd.DataFrame(st.session_state.data)
+    # convert the window_start string into an actual timestamp column
+    df['time'] = pd.to_datetime(df['window_start'])
         
         # Filter by City
         if selected_cities:
@@ -114,10 +119,15 @@ def update_dashboard():
                 cols = st.columns(len(latest_df))
                 for idx, row in latest_df.iterrows():
                     with cols[min(idx, len(cols)-1)]:
+                        # prepare delta only if the fields exist (older messages may not)
+                        delta_text = ""
+                        if 'min_temp' in row and 'max_temp' in row:
+                            delta_text = f"Min: {row['min_temp']:.1f} / Max: {row['max_temp']:.1f}"
+
                         st.metric(
                             label=row['name'],
                             value=f"{row['avg_temp']:.1f} °C",
-                            delta=f"Min: {row['min_temp']:.1f} / Max: {row['max_temp']:.1f}"
+                            delta=delta_text
                         )
             
             st.markdown("---")
