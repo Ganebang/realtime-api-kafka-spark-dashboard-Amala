@@ -19,11 +19,12 @@ rm -rf checkpoints/* data/bronze_weather/* || true
 
 
 # 1. Start Docker Containers
-echo "Step 1: Starting Docker Containers..."
+echo "Step 1: Starting Docker Containers (Kafka, Zookeeper, Kafka UI, Prometheus)..."
 docker compose -f docker/docker-compose.yml up -d
 
-# Wait for Kafka to be ready
-echo "Waiting for Kafka to be ready..."
+# Wait for Kafka (and monitoring) to be ready
+# users can visit localhost:9090 (Prometheus) once up
+echo "Waiting for Kafka (and monitoring services) to be ready..."
 sleep 20  # Simple wait, could be improved with healthchecks
 
 # ensure required topics exist (auto.create.topics may be disabled)

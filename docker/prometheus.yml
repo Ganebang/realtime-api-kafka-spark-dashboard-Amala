@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9092'] # Note: Requires JMX exporter to work fully
+  - job_name: 'spark'
+    static_configs:
+      - targets: ['host.docker.internal:4040'] # Scrapes the Spark UI metrics

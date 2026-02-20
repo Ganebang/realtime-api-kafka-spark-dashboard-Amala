@@ -58,6 +58,8 @@ def create_spark_session():
             .config("spark.jars", jars_str) \
             .config("spark.driver.extraClassPath", jars_str) \
             .config("spark.executor.extraClassPath", jars_str) \
+            .config("spark.ui.prometheus.enabled", "true") \
+            .config("spark.executor.processTreeMetrics.enabled", "true") \
             .getOrCreate()
         spark.sparkContext.setLogLevel("WARN")
         print("Spark Session Initialized.")

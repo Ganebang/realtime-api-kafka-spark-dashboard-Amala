@@ -95,9 +95,11 @@ def update_dashboard():
     # Prepare Data
     if st.session_state.data:
         # turn buffered messages into a pandas table so we can manipulate them
-    df = pd.DataFrame(st.session_state.data)
-    # convert the window_start string into an actual timestamp column
-    df['time'] = pd.to_datetime(df['window_start'])
+        # (pandas provides convenient filtering, grouping, and datetime handling;
+        #  it could be replaced by manual list/dict processing if you prefer)
+        df = pd.DataFrame(st.session_state.data)
+        # convert the window_start string into an actual timestamp column
+        df['time'] = pd.to_datetime(df['window_start'])
         
         # Filter by City
         if selected_cities:

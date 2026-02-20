@@ -27,6 +27,7 @@ graph TD
 ## 🚀 Key Features
 
 *   **Real-Time Ingestion**: Polls weather data for multiple cities every 15 seconds (configurable via `.env`).
+*   **Observability**: Kafka and Spark expose Prometheus metrics; view them at http://localhost:9090.
 *   **Stream Processing**: Uses Spark Structured Streaming to calculate rolling averages, min/max temperatures, and wind speeds.
 *   **Low Latency**: Optimized for near real-time updates (15s latency).
 *   **Data Persistence**: Raw messages are archived under `data/`, and processing state is kept in `checkpoints/` for reliable restarts.
@@ -44,7 +45,8 @@ graph TD
 *   **Message Broker**: Apache Kafka, Zookeeper (via Docker)
 *   **Processing**: Apache Spark (PySpark)
 *   **Visualization**: Streamlit, Plotly (dashboard now shows average, min, and max temperatures plus wind speed)
-*   **Infrastructure**: Docker, Docker Compose
+*   **Monitoring**: Prometheus scraping Spark & Kafka metrics
+*   **Infrastructure**: Docker, Docker Compose (includes Kafka, Zookeeper, Kafka UI, Prometheus for monitoring)
 
 ## 📋 Prerequisites
 
@@ -54,82 +56,96 @@ graph TD
 
 ## ⚡ Quick Start
 
-The project includes a helper script to automate the entire startup process.
+The easiest way to get everything up and running is the convenience script. It encapsulates all of
+our current code changes and handles both infrastructure and application startup in one command.
 
 1.  **Clone the repository** (if you haven't already).
 2.  **Create & populate your `.env`**
     ```bash
     cp .env.example .env
-    # then open .env and set your personal OpenWeather API key
+    # open .env and set your OpenWeather API key
     # e.g. OPENWEATHER_API_KEY=your_api_key_here
     ```
-    The producer will fail with a clear error if the key is missing.
-3.  **Activate the virtual environment** (optional but recommended):
+    Leaving the key empty will cause the producer to log 401 errors and no data will flow.
+3.  **(Optional) Activate a Python venv**:
     ```bash
     source .venv/bin/activate
     ```
-4.  **Run the application**:
+4.  **Launch the entire pipeline**:
     ```bash
     ./scripts/run_all.sh
     ```
-    This script will automatically:
-    *   Start Docker containers (Kafka, Zookeeper, Kafka UI).
-    *   Start the API Producer in the background.
-    *   Start the Spark Streaming App in the background.
-    *   Launch the Streamlit Dashboard. Metrics include the current average temperature along with minimum and maximum readings for each city.
 
-5.  **Access the Dashboard**:
-    Open your browser at **[http://localhost:8501](http://localhost:8501)**.
+    The script will:
+    *   Bring up the necessary Docker services (Kafka & Zookeeper, Kafka UI, Prometheus).
+    *   Kick off the API producer in the background.
+    *   Start the Spark streaming job that computes rolling averages, min/max and wind alerts.
+    *   Open the Streamlit dashboard which now uses `pandas` internally for slick filtering.
 
-## 🔧 Manual Setup
+5.  **Browse the applications**:
+    *   Dashboard – [http://localhost:8501](http://localhost:8501)
+    *   Kafka UI – http://localhost:8081
+    *   Prometheus – http://localhost:9090
+    
+By default you rarely need to run `docker compose` yourself; the helper script handles it. If you
+do want manual control see the section below.
+## 🔧 Manual Setup (Optional)
 
-If you prefer to run components individually, use separate terminals:
+Should you wish to start pieces by hand or inspect them individually, these are the steps. Note
+that the helper script above is the recommended path and will execute these same commands for you.
 
-1.  **Start Infrastructure**:
+1.  **Bring up the infrastructure**: the `docker-compose.yml` file defines Kafka, Zookeeper, Kafka
+    UI and Prometheus.
     ```bash
     docker compose -f docker/docker-compose.yml up -d
     ```
 
-2.  **Start Producer**:
+2.  **Producer** – ensure your virtualenv is active and then run:
     ```bash
     source .venv/bin/activate
     python src/ingestion/api_producer.py
     ```
 
-3.  **Start Spark Processor**:
+3.  **Spark Streaming** – the processor emits averages, min/max values, and high‑wind alerts:
     ```bash
     source .venv/bin/activate
     python src/processing/streaming_app.py
     ```
 
-4.  **Start Dashboard**:
+4.  **Dashboard** – relies on `pandas` for filtering and formatting:
     ```bash
     source .venv/bin/activate
     streamlit run src/dashboard/app.py
     ```
 
+You only need Docker Compose if you're managing the container services yourself; otherwise the
+`run_all.sh` script handles the orchestration end‑to‑end.
+
 ## 📂 Project Structure
+
+The codebase is deliberately small and modular – each major subsystem lives under `src/`.
 
 ```
 ├── docker/
-│   └── docker-compose.yml   # Kafka & Zookeeper configuration
+│   └── docker-compose.yml   # Kafka, Zookeeper, Prometheus, Kafka‑UI
 ├── scripts/
-│   └── run_all.sh           # Automation script
+│   └── run_all.sh           # Single‑command orchestration of containers & Python services
 ├── src/
 │   ├── dashboard/
-│   │   └── app.py           # Streamlit Dashboard
+│   │   └── app.py           # Streamlit dashboard (uses pandas for data munging)
 │   ├── ingestion/
-│   │   ├── api_client.py    # OpenWeatherMap Client
-│   │   └── api_producer.py  # Kafka Producer
+│   │   ├── api_client.py    # OpenWeatherMap REST client
+│   │   └── api_producer.py  # Kafka producer with polling loop and graceful shutdown
 │   └── processing/
-│       └── streaming_app.py # Spark Streaming Job
-├── librairies/              # JAR dependencies (Spark/Kafka)
-├── data/                    # Bronze parquet storage (raw events)
-├── checkpoints/             # Spark & Kafka offset state
-├── screenshots/             # Example images and documentation
-├── .env                     # Configuration (API Keys, Settings)
+│       └── streaming_app.py # Spark job with bronze/gold lakehouse, min/max metrics, and
+│                              # Prometheus configuration
+├── librairies/              # External JARs required by Spark/Kafka
+├── data/                    # Bronze parquet storage (raw events preserved)
+├── checkpoints/             # Spark state & Kafka offsets for resilient restarts
+├── screenshots/             # Example dashboard images for documentation
+├── .env                     # Runtime configuration (API keys etc.) – ignored by Git
 ├── .env.example             # Template for environment variables
-└── requirements.txt         # Python Dependencies
+└── requirements.txt         # Python dependencies (listed for virtualenv)
 
 ## 🔒 Security
 
