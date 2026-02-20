@@ -9,18 +9,18 @@ A complete end-to-end data engineering project that ingests real-time weather da
 
 ```mermaid
 graph TD
-    API[OpenWeatherMap API] -->|JSON| Producer[Python Producer];
-    Producer -->|Topic: raw_api_events| Kafka[Kafka Broker];
+    API[OpenWeatherMap API] -->|JSON| Producer[Python Producer]
+    Producer -->|Topic: raw_api_events| Kafka[Kafka Broker]
 
     subgraph Processing Layer
-        Kafka -->|Read Stream| SparkNode[Spark Streaming (PySpark)];
-        SparkNode -->|Aggregation (5‑minute sliding window)| SparkNode;
-        SparkNode -->|Topic: weather_aggregates| Kafka;
+        Kafka -->|Read Stream| SparkNode["Spark Streaming (PySpark)"]
+        SparkNode -->|Aggregation (5-minute sliding window)| SparkNode2["Windowed Aggregator"]
+        SparkNode2 -->|Topic: weather_aggregates| Kafka
     end
 
     subgraph Visualization Layer
-        Kafka -->|Consume Stream| Dashboard[Streamlit Dashboard];
-        Dashboard -->|Live Charts & Metrics| User[End User];
+        Kafka -->|Consume Stream| Dashboard[Streamlit Dashboard]
+        Dashboard -->|Live Charts & Metrics| User[End User]
     end
 ```
 
